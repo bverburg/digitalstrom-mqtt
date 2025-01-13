@@ -5,11 +5,11 @@ import "strings"
 // Returns the device type given its hardware technicalName
 func (functionBlock *FunctionBlock) DeviceType() DeviceType {
 	switch {
-	case strings.HasPrefix(functionBlock.Attributes.TechnicalName, "GE"):
+	case strings.HasPrefix(functionBlock.Attributes.TechnicalName, "GE") || strings.HasPrefix(functionBlock.Attributes.TechnicalName, "LI"):
 		return DeviceTypeLight
 	case strings.HasPrefix(functionBlock.Attributes.TechnicalName, "GR"):
 		return DeviceTypeBlind
-	case strings.HasPrefix(functionBlock.Attributes.TechnicalName, "SW"):
+	case strings.HasPrefix(functionBlock.Attributes.TechnicalName, "SW") || strings.HasPrefix(functionBlock.Attributes.TechnicalName, "UN"):
 		return DeviceTypeJoker
 	default:
 		return DeviceTypeUnknown
