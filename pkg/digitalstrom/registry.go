@@ -2,9 +2,13 @@ package digitalstrom
 
 import (
 	"errors"
-	"github.com/rs/zerolog/log"
 	"sync"
+	"time"
+
+	"github.com/rs/zerolog/log"
 )
+
+type ScenarioChangeCallback func(scenarioId string, oldValue ScenarioState, newValue ScenarioState, scheduledAt time.Time, terminatesAt time.Time)
 
 type DeviceChangeCallback func(deviceId string, outputId string, oldValue float64, newValue float64)
 
@@ -15,13 +19,16 @@ type Registry interface {
 	Stop() error
 
 	GetDevices() ([]Device, error)
+	GetScenarios() ([]Scenario, error)
 
 	GetDevice(deviceId string) (Device, error)
+	GetScenario(scenarioId string) (Scenario, error)
 
 	GetFunctionBlockForDevice(deviceId string) (FunctionBlock, error)
 
 	GetOutputsOfDevice(deviceId string) ([]Output, error)
 	GetOutputValuesOfDevice(deviceId string) ([]OutputValue, error)
+	GetValueOfScenario(scenarioId string) (ScenarioState, error)
 
 	GetControllers() ([]Controller, error)
 	GetControllerById(controllerId string) (Controller, error)
@@ -29,6 +36,9 @@ type Registry interface {
 
 	DeviceChangeSubscribe(deviceId string, callback DeviceChangeCallback) error
 	DeviceChangeUnsubscribe(deviceId string) error
+
+	ScenarioChangeSubscribe(scenarioId string, callback ScenarioChangeCallback) error
+	ScenarioChangeUnsubscribe(scenarioId string) error
 }
 
 type registry struct {
@@ -40,18 +50,21 @@ type registry struct {
 
 	controllersLookup    map[string]Controller
 	devicesLookup        map[string]Device
+	scenariosLookup      map[string]Scenario
 	submoduleLookup      map[string]Submodule
 	functionBlocksLookup map[string]FunctionBlock
 
-	deviceChangeCallbacks map[string]DeviceChangeCallback
+	deviceChangeCallbacks   map[string]DeviceChangeCallback
+	scenarioChangeCallbacks map[string]ScenarioChangeCallback
 
 	registryLoading sync.Mutex
 }
 
 func NewRegistry(digitalstromClient Client) Registry {
 	return &registry{
-		digitalstromClient:    digitalstromClient,
-		deviceChangeCallbacks: make(map[string]DeviceChangeCallback),
+		digitalstromClient:      digitalstromClient,
+		deviceChangeCallbacks:   make(map[string]DeviceChangeCallback),
+		scenarioChangeCallbacks: make(map[string]ScenarioChangeCallback),
 	}
 }
 
@@ -80,6 +93,18 @@ func (r *registry) Start() error {
 
 func (r *registry) Stop() error {
 	return nil
+}
+
+func (r *registry) GetScenarios() ([]Scenario, error) {
+	return r.apartment.Included.Scenarios, nil
+}
+
+func (r *registry) GetScenario(scenarioId string) (Scenario, error) {
+	scenario, ok := r.scenariosLookup[scenarioId]
+	if ok {
+		return scenario, nil
+	}
+	return Scenario{}, errors.New("No scenario found with id " + scenarioId)
 }
 
 func (r *registry) GetDevices() ([]Device, error) {
@@ -127,6 +152,20 @@ func (r *registry) GetOutputValuesOfDevice(deviceId string) ([]OutputValue, erro
 	}
 
 	return outputs, nil
+}
+
+// GetValueOfScenario implements Registry.
+func (r *registry) GetValueOfScenario(scenarioId string) (ScenarioState, error) {
+
+	for _, zone := range r.apartmentStatus.Included.Zones {
+		for _, scenario := range zone.Attributes.Scenarios {
+			if scenario.ScenarioId == scenarioId {
+				return scenario.Status, nil
+			}
+		}
+	}
+
+	return ScenarioStateUnknown, nil
 }
 
 func (r *registry) GetFunctionBlockForDevice(deviceId string) (FunctionBlock, error) {
@@ -184,6 +223,7 @@ func (r *registry) updateApartment() error {
 
 	r.controllersLookup = make(map[string]Controller)
 	r.devicesLookup = make(map[string]Device)
+	r.scenariosLookup = make(map[string]Scenario)
 	r.submoduleLookup = make(map[string]Submodule)
 	r.functionBlocksLookup = make(map[string]FunctionBlock)
 
@@ -199,6 +239,9 @@ func (r *registry) updateApartment() error {
 	}
 	for _, functionBlock := range apartment.Included.FunctionBlocks {
 		r.functionBlocksLookup[functionBlock.FunctionBlockId] = functionBlock
+	}
+	for _, scenario := range apartment.Included.Scenarios {
+		r.scenariosLookup[scenario.ScenarioId] = scenario
 	}
 
 	return nil
@@ -236,6 +279,24 @@ func (r *registry) DeviceChangeUnsubscribe(deviceId string) error {
 	return nil
 }
 
+func (r *registry) ScenarioChangeSubscribe(scenarioId string, callback ScenarioChangeCallback) error {
+	_, exists := r.scenarioChangeCallbacks[scenarioId]
+	if exists {
+		return errors.New("Callback already registered for scenario " + scenarioId)
+	}
+	r.scenarioChangeCallbacks[scenarioId] = callback
+	return nil
+}
+
+func (r *registry) ScenarioChangeUnsubscribe(scenarioId string) error {
+	_, exists := r.scenarioChangeCallbacks[scenarioId]
+	if !exists {
+		return errors.New("No callback registered for scenario " + scenarioId)
+	}
+	delete(r.scenarioChangeCallbacks, scenarioId)
+	return nil
+}
+
 func (r *registry) updateApartmentStatusAndFireChangeEvents() error {
 	oldStatus := r.apartmentStatus
 	newStatus, err := r.digitalstromClient.GetApartmentStatus()
@@ -246,13 +307,37 @@ func (r *registry) updateApartmentStatusAndFireChangeEvents() error {
 
 	if oldStatus != nil {
 		// Check diff and broadcast events
-
-		oldStatusLookup := make(map[string]map[string]OutputValue)
+		oldStatusDeviceLookup := make(map[string]map[string]OutputValue)
 		for _, device := range oldStatus.Included.Devices {
-			oldStatusLookup[device.DeviceId] = make(map[string]OutputValue)
+			oldStatusDeviceLookup[device.DeviceId] = make(map[string]OutputValue)
 			for _, functionBlock := range device.Attributes.FunctionBlocks {
 				for _, output := range functionBlock.Outputs {
-					oldStatusLookup[device.DeviceId][output.OutputId] = output
+					oldStatusDeviceLookup[device.DeviceId][output.OutputId] = output
+				}
+			}
+		}
+		oldStatusScenarioLookup := make(map[string]ScenarioState)
+		for _, zone := range oldStatus.Included.Zones {
+			for _, scenario := range zone.Attributes.Scenarios {
+				oldStatusScenarioLookup[scenario.ScenarioId] = scenario.Status
+			}
+		}
+
+		for _, zone := range newStatus.Included.Zones {
+			for _, scenario := range zone.Attributes.Scenarios {
+				oldStatus := oldStatusScenarioLookup[scenario.ScenarioId]
+				if oldStatus != scenario.Status {
+					log.Info().
+						Str("ScenarioId", scenario.ScenarioId).
+						Str("oldValue", string(oldStatus)).
+						Str("newValue", string(scenario.Status)).
+						Msg("Scene invoked")
+
+					callback, exists := r.scenarioChangeCallbacks[scenario.ScenarioId]
+					if exists {
+						t := time.Now()
+						callback(scenario.ScenarioId, oldStatus, scenario.Status, t, t)
+					}
 				}
 			}
 		}
@@ -260,7 +345,7 @@ func (r *registry) updateApartmentStatusAndFireChangeEvents() error {
 		for _, device := range newStatus.Included.Devices {
 			for _, functionBlock := range device.Attributes.FunctionBlocks {
 				for _, newOutput := range functionBlock.Outputs {
-					oldOutput := oldStatusLookup[device.DeviceId][newOutput.OutputId]
+					oldOutput := oldStatusDeviceLookup[device.DeviceId][newOutput.OutputId]
 					if oldOutput.TargetValue != newOutput.TargetValue {
 						log.Info().
 							Str("DeviceId", device.DeviceId).

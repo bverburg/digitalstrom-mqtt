@@ -23,6 +23,7 @@ type ApartmentIncluded struct {
 	Zones          []Zone          `mapstructure:"zones"`
 	Controllers    []Controller    `mapstructure:"controllers"`
 	Meterings      []Metering      `mapstructure:"meterings"`
+	Scenarios      []Scenario      `mapstructure:"scenarios"`
 }
 
 type Installation struct {
@@ -152,6 +153,10 @@ type Area struct {
 }
 
 type Scenarios struct {
+	Scenarios []Scenario `mapstructure:"scenarios"`
+}
+
+type Scenario struct {
 	ScenarioId string             `mapstructure:"id"`
 	Type       ScenarioType       `mapstructure:"type"`
 	Attributes ScenarioAttributes `mapstructure:"attributes"`
@@ -219,6 +224,20 @@ type ApartmentStatus struct {
 
 type ApartmentStatusIncluded struct {
 	Devices []DeviceStatus `mapstructure:"dsDevices"`
+	Zones   []ZoneStatus   `mapstructure:"zones"`
+}
+
+type ZoneStatus struct {
+	ZoneId     string               `mapstructure:"id"`
+	Type       string               `mapstructure:"type"`
+	Attributes ZoneStatusAttributes `mapstructure:"attributes"`
+}
+
+type ZoneStatusAttributes struct {
+	Scenarios []struct {
+		ScenarioId string        `mapstructure:"id"`
+		Status     ScenarioState `mapstructure:"status"`
+	} `mapstructure:"scenarios"`
 }
 
 type DeviceStatus struct {

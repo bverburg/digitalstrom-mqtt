@@ -111,7 +111,7 @@ func (c *Controller) Stop() error {
 		return fmt.Errorf("error disconnecting to MQTT client: %w", err)
 	}
 	if err := c.dsRegistry.Stop(); err != nil {
-		return fmt.Errorf("error stoping DigitalStrom registry: %w", err)
+		return fmt.Errorf("error stopping DigitalStrom registry: %w", err)
 	}
 	if err := c.dsClient.Disconnect(); err != nil {
 		return fmt.Errorf("error disconnecting to DigitalStrom client: %w", err)

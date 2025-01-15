@@ -1,5 +1,7 @@
 package digitalstrom
 
+import "errors"
+
 type DeviceType string
 
 const (
@@ -121,6 +123,29 @@ const (
 	ButtonInputTypeGroup       ButtonInputType = "group"
 	ButtonInputTypeAppmode     ButtonInputType = "appmode"
 )
+
+// new state struct
+type ScenarioState string
+
+const (
+	ScenarioStateActive   ScenarioState = "active"
+	ScenarioStateInactive ScenarioState = "inactive"
+	ScenarioStateUnknown  ScenarioState = "unknown"
+)
+
+// Function to convert string to ScenarioState
+func StringToScenarioState(s string) (ScenarioState, error) {
+	switch s {
+	case string(ScenarioStateActive):
+		return ScenarioStateActive, nil
+	case string(ScenarioStateInactive):
+		return ScenarioStateInactive, nil
+	case string(ScenarioStateUnknown):
+		return ScenarioStateInactive, nil
+	default:
+		return "", errors.New("invalid ScenarioState string")
+	}
+}
 
 type ButtonInputMode string
 

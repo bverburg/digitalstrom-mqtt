@@ -5,15 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/gorilla/websocket"
-	"github.com/mitchellh/mapstructure"
-	"github.com/rs/zerolog/log"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gorilla/websocket"
+	"github.com/mitchellh/mapstructure"
+	"github.com/rs/zerolog/log"
 )
 
 const WEBSOCKET_RECONNECT_DELAY = 5 * time.Second
@@ -38,6 +39,7 @@ type Client interface {
 
 	// DeviceSetOutputValue Sets a list of outputs to a give values
 	DeviceSetOutputValue(deviceId string, functionBlockId string, outputId string, value float64) error
+	ScenarioInvoke(scenarioId string) error
 
 	NotificationSubscribe(id string, callback NotificationCallback) error
 	NotificationUnsubscribe(id string) error
@@ -147,7 +149,7 @@ func (c *client) Disconnect() error {
 
 func (c *client) GetApartment() (*Apartment, error) {
 	params := url.Values{}
-	params.Set("include", "installation,dsDevices,submodules,functionBlocks,zones,controllers,meterings")
+	params.Set("include", "installation,dsDevices,submodules,functionBlocks,zones,controllers,meterings,scenarios")
 	response, err := c.getRequest("api/v1/apartment", params)
 	return wrapApiResponse[Apartment](response, err)
 }
@@ -159,6 +161,11 @@ func (c *client) GetApartmentStatus() (*ApartmentStatus, error) {
 	return wrapApiResponse[ApartmentStatus](response, err)
 }
 
+func (c *client) GetScenarios() (*Scenarios, error) {
+	response, err := c.getRequest("api/v1/apartment/scenarios", nil)
+	return wrapApiResponse[Scenarios](response, err)
+}
+
 func (c *client) GetMeterings() (*Meterings, error) {
 	response, err := c.getRequest("api/v1/apartment/meterings", nil)
 	return wrapApiResponse[Meterings](response, err)
@@ -167,6 +174,11 @@ func (c *client) GetMeterings() (*Meterings, error) {
 func (c *client) GetMeteringStatus() (*MeteringValues, error) {
 	response, err := c.getRequest("api/v1/apartment/meterings/values", nil)
 	return wrapApiResponse[MeteringValues](response, err)
+}
+
+func (c *client) ScenarioInvoke(scenarioId string) error {
+	path := fmt.Sprintf("api/v1/apartment/scenarios/%s/invoke", scenarioId)
+	return c.postEmptyRequest(path)
 }
 
 func (c *client) DeviceSetOutputValue(deviceId string, functionBlockId string, outputId string, value float64) error {
@@ -248,6 +260,11 @@ func (c *client) doRequest(method string, path string, params url.Values, body i
 
 func (c *client) patchRequest(path string, body interface{}) error {
 	_, err := c.doRequest(http.MethodPatch, path, nil, body)
+	return err
+}
+
+func (c *client) postEmptyRequest(path string) error {
+	_, err := c.doRequest(http.MethodPost, path, nil, nil)
 	return err
 }
 
